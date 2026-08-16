@@ -2,10 +2,6 @@
 
 A privacy-conscious Obsidian sidebar that keeps files and folders you add, recent files, and most-opened files together.
 
-![Quick Access Dashboard in Obsidian, shown with synthetic example data](docs/quick-access-dashboard.png)
-
-*Shown with synthetic example data.*
-
 ## Features
 
 - Add files and expandable folders to Quick Access.
