@@ -2,6 +2,10 @@
 
 A privacy-conscious Obsidian sidebar that keeps pinned files and folders, recent files, and most-opened files together.
 
+![Quick Access Dashboard in Obsidian, shown with synthetic example data](docs/quick-access-dashboard.png)
+
+*Shown with synthetic example data.*
+
 ## Features
 
 - Pin files and expandable folders.
@@ -35,12 +39,11 @@ Pins use Obsidian's normal plugin data. Access activity uses Obsidian's vault-sp
 
 ## Installation
 
-### Public beta with BRAT
+### Community plugins
 
-1. Install [BRAT](https://obsidian.md/plugins?id=obsidian42-brat).
-2. In BRAT, select **Add Beta plugin**.
-3. Enter `https://github.com/harrisonaedwards/obsidian-quick-access-dashboard`.
-4. Enable **Quick Access Dashboard** under **Settings → Community plugins**.
+1. Open **Settings → Community plugins → Browse**.
+2. Search for **Quick Access Dashboard**.
+3. Select **Install**, then **Enable**.
 
 ### Manual installation
 
