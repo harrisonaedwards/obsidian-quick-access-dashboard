@@ -24,7 +24,7 @@ class ResetActivityModal extends Modal {
 
   onOpen() {
     this.setTitle("Reset access statistics?");
-    this.setContent("This permanently deletes recent and most-opened activity on this device. Pins are kept.");
+    this.setContent("This permanently deletes recent and most-opened activity on this device. Quick Access items are kept.");
 
     const actions = this.contentEl.createDiv({ cls: "modal-button-container" });
     actions
@@ -55,11 +55,11 @@ class QuickAccessView extends ItemView {
   }
 
   getDisplayText() {
-    return "Quick Access";
+    return "Quick Access Dashboard";
   }
 
   getIcon() {
-    return "pin";
+    return "layout-dashboard";
   }
 
   async onOpen() {
@@ -85,13 +85,13 @@ class QuickAccessView extends ItemView {
   }
 
   renderPinnedSection() {
-    const body = this.createSection("Pinned");
+    const body = this.createSection("Quick Access");
     const existingPins = this.plugin.data.pins
       .map((pin) => ({ pin, target: this.app.vault.getAbstractFileByPath(pin.path) }))
       .filter((entry) => entry.target !== null);
 
     if (existingPins.length === 0) {
-      this.renderEmpty(body, "Right-click a file or folder to pin it.");
+      this.renderEmpty(body, "Right-click a file or folder and select Add to Quick Access.");
       return;
     }
 
@@ -250,7 +250,7 @@ class QuickAccessView extends ItemView {
 
   addUnpinButton(row, path, kind) {
     const button = row.createEl("button", {
-      attr: { "aria-label": "Unpin", title: "Unpin" },
+      attr: { "aria-label": "Remove from Quick Access", title: "Remove from Quick Access" },
       cls: "clickable-icon quick-access-unpin"
     });
     setIcon(button, "x");
@@ -292,7 +292,7 @@ class QuickAccessPlugin extends Plugin {
     const pruned = pruneDailyData(this.data, new Date());
 
     this.registerView(VIEW_TYPE, (leaf) => new QuickAccessView(leaf, this));
-    this.addRibbonIcon("pin", "Open Quick Access", () => void this.openDashboard(true));
+    this.addRibbonIcon("layout-dashboard", "Open Quick Access Dashboard", () => void this.openDashboard(true));
     this.addCommand({
       id: "open-dashboard",
       name: "Open dashboard",
@@ -300,7 +300,7 @@ class QuickAccessPlugin extends Plugin {
     });
     this.addCommand({
       id: "toggle-pin-active-file",
-      name: "Pin or unpin active file",
+      name: "Add or remove active file from Quick Access",
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!file) {
@@ -404,8 +404,8 @@ class QuickAccessPlugin extends Plugin {
     menu.addItem((item) =>
       item
         .setSection("action")
-        .setTitle(pinned ? "Unpin from Quick Access" : "Pin to Quick Access")
-        .setIcon(pinned ? "pin-off" : "pin")
+        .setTitle(pinned ? "Remove from Quick Access" : "Add to Quick Access")
+        .setIcon(pinned ? "minus-circle" : "plus-circle")
         .onClick(() => void this.setPinned(target.path, kind, !pinned))
     );
   }
@@ -558,7 +558,7 @@ class QuickAccessPlugin extends Plugin {
         await this.saveData(settingsSnapshot(this.data));
       } catch (error) {
         this.settingsSaveDirty = false;
-        console.error("Quick Access: could not save pinned items", error);
+        console.error("Quick Access: could not save Quick Access items", error);
         return;
       }
     }

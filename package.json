@@ -1,7 +1,7 @@
 {
   "name": "obsidian-quick-access-dashboard",
-  "version": "0.1.0",
-  "description": "Pinned files and folders, recent files, and most-opened files in one local Obsidian sidebar.",
+  "version": "0.1.1",
+  "description": "Files and folders you add, recent files, and most-opened files in one local Obsidian sidebar.",
   "private": true,
   "license": "MIT",
   "repository": {

@@ -1,9 +1,9 @@
 {
   "id": "quick-access-dashboard",
   "name": "Quick Access Dashboard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.13.0",
-  "description": "Pinned files and folders, recent files, and most-opened files in one local sidebar.",
+  "description": "Files and folders you add, recent files, and most-opened files in one local sidebar.",
   "author": "harrisonaedwards",
   "authorUrl": "https://github.com/harrisonaedwards",
   "isDesktopOnly": true
