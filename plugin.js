@@ -5,6 +5,8 @@ const {
   Modal,
   Notice,
   Plugin,
+  PluginSettingTab,
+  Setting,
   setIcon,
   TFile,
   TFolder
@@ -12,7 +14,12 @@ const {
 
 const VIEW_TYPE = "quick-access-dashboard-view";
 const MENU_SOURCE = "quick-access-dashboard";
-const DISPLAY_LIMIT = 12;
+const SECTION_LABELS = {
+  recent: "Recently opened",
+  created: "Recently created",
+  sevenDays: "Most opened · 7 days",
+  allTime: "Most opened · all time"
+};
 const ACTIVITY_STORAGE_KEY = "quick-access-dashboard:activity";
 const ACTIVITY_SAVE_DELAY_MS = 750;
 
@@ -24,7 +31,7 @@ class ResetActivityModal extends Modal {
 
   onOpen() {
     this.setTitle("Reset access statistics?");
-    this.setContent("This permanently deletes recent and most-opened activity on this device. Quick Access items are kept.");
+    this.setContent("This permanently deletes recently opened, recently created, and most-opened activity on this device. Quick Access items are kept.");
 
     const actions = this.contentEl.createDiv({ cls: "modal-button-container" });
     actions
@@ -40,6 +47,41 @@ class ResetActivityModal extends Modal {
 
   onClose() {
     this.contentEl.empty();
+  }
+}
+
+class QuickAccessSettingTab extends PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    const display = this.plugin.data.display;
+
+    new Setting(containerEl)
+      .setName("Entries per section")
+      .setDesc("Maximum files shown in each automatic section.")
+      .addSlider((slider) =>
+        slider
+          .setLimits(MIN_DISPLAY_LIMIT, MAX_DISPLAY_LIMIT, 1)
+          .setValue(display.limit)
+          .setDynamicTooltip()
+          .onChange((value) => void this.plugin.updateDisplay({ limit: value }))
+      );
+
+    new Setting(containerEl).setName("Sections").setHeading();
+    for (const key of SECTION_KEYS) {
+      new Setting(containerEl)
+        .setName(SECTION_LABELS[key])
+        .addToggle((toggle) =>
+          toggle
+            .setValue(display.sections[key])
+            .onChange((value) => void this.plugin.updateDisplay({ sections: { [key]: value } }))
+        );
+    }
   }
 }
 
@@ -78,10 +120,24 @@ class QuickAccessView extends ItemView {
 
   render() {
     this.contentEl.empty();
+    const { sections } = this.plugin.data.display;
     this.renderPinnedSection();
-    this.renderRecentSection();
-    this.renderRankedSection("Most opened · 7 days", rankSevenDays(this.plugin.data, new Date()));
-    this.renderRankedSection("Most opened · all time", rankAllTime(this.plugin.data));
+    if (sections.recent) {
+      this.renderRecentSection();
+    }
+    if (sections.created) {
+      this.renderCreatedSection();
+    }
+    if (sections.sevenDays) {
+      this.renderRankedSection(SECTION_LABELS.sevenDays, rankSevenDays(this.plugin.data, new Date()));
+    }
+    if (sections.allTime) {
+      this.renderRankedSection(SECTION_LABELS.allTime, rankAllTime(this.plugin.data));
+    }
+  }
+
+  displayLimit() {
+    return this.plugin.data.display.limit;
   }
 
   renderPinnedSection() {
@@ -105,14 +161,32 @@ class QuickAccessView extends ItemView {
   }
 
   renderRecentSection() {
-    const body = this.createSection("Recent");
+    const body = this.createSection(SECTION_LABELS.recent);
     const files = this.plugin.data.recentPaths
       .map((path) => this.app.vault.getFileByPath(path))
       .filter((file) => file !== null)
-      .slice(0, DISPLAY_LIMIT);
+      .slice(0, this.displayLimit());
 
     if (files.length === 0) {
       this.renderEmpty(body, "Files appear here as you navigate.");
+      return;
+    }
+
+    for (const file of files) {
+      this.renderFile(file, body);
+    }
+  }
+
+  renderCreatedSection() {
+    const body = this.createSection(SECTION_LABELS.created);
+    const files = this.plugin.data.createdPaths
+      .filter((path) => !this.plugin.isExcluded(path))
+      .map((path) => this.app.vault.getFileByPath(path))
+      .filter((file) => file !== null)
+      .slice(0, this.displayLimit());
+
+    if (files.length === 0) {
+      this.renderEmpty(body, "Files appear here as they are created.");
       return;
     }
 
@@ -126,7 +200,7 @@ class QuickAccessView extends ItemView {
     const existing = ranked
       .map((entry) => ({ entry, file: this.app.vault.getFileByPath(entry.path) }))
       .filter((value) => value.file !== null)
-      .slice(0, DISPLAY_LIMIT);
+      .slice(0, this.displayLimit());
 
     if (existing.length === 0) {
       this.renderEmpty(body, "Counts begin with your next file change.");
@@ -292,6 +366,7 @@ class QuickAccessPlugin extends Plugin {
     const pruned = pruneDailyData(this.data, new Date());
 
     this.registerView(VIEW_TYPE, (leaf) => new QuickAccessView(leaf, this));
+    this.addSettingTab(new QuickAccessSettingTab(this.app, this));
     this.addRibbonIcon("layout-dashboard", "Open Quick Access Dashboard", () => void this.openDashboard(true));
     this.addCommand({
       id: "open-dashboard",
@@ -331,6 +406,7 @@ class QuickAccessPlugin extends Plugin {
         this.observeForegroundFile(this.app.workspace.getActiveFile())
       )
     );
+    this.registerEvent(this.app.vault.on("create", (target) => this.handleCreate(target)));
     this.registerEvent(
       this.app.vault.on("rename", (target, oldPath) => this.handleRename(target, oldPath))
     );
@@ -446,6 +522,35 @@ class QuickAccessPlugin extends Plugin {
       this.trackingReady = true;
       this.trackingStartTimer = null;
     }, 500);
+  }
+
+  async updateDisplay(patch) {
+    const current = this.data.display;
+    this.data.display = normaliseDisplay({
+      limit: patch.limit ?? current.limit,
+      sections: { ...current.sections, ...(patch.sections ?? {}) }
+    });
+    this.refreshViews();
+    await this.requestSettingsSave();
+  }
+
+  isExcluded(path) {
+    const filters =
+      typeof this.app.vault.getConfig === "function"
+        ? this.app.vault.getConfig("userIgnoreFilters")
+        : null;
+    return isExcludedPath(path, compileExcludedFilters(filters));
+  }
+
+  handleCreate(target) {
+    if (!this.layoutReady || !(target instanceof TFile) || this.isExcluded(target.path)) {
+      return;
+    }
+    if (!recordCreate(this.data, target.path)) {
+      return;
+    }
+    this.refreshViews();
+    this.scheduleActivitySave();
   }
 
   handleRename(target, oldPath) {
