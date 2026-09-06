@@ -18,6 +18,7 @@ class FakePlugin {
 
 class FakeItemView {}
 class FakeModal {}
+class FakePluginSettingTab {}
 class FakeFile {}
 class FakeFolder {}
 
@@ -35,6 +36,8 @@ before(() => {
         Modal: FakeModal,
         Notice: class {},
         Plugin: FakePlugin,
+        PluginSettingTab: FakePluginSettingTab,
+        Setting: class {},
         setIcon: () => {},
         TFile: FakeFile,
         TFolder: FakeFolder
@@ -93,7 +96,12 @@ describe("plugin persistence", () => {
     plugin.flushActivitySave();
 
     const stored = app.local.get("quick-access-dashboard:activity");
-    assert.deepEqual(Object.keys(stored).sort(), ["recentPaths", "records", "schemaVersion"]);
+    assert.deepEqual(Object.keys(stored).sort(), [
+      "createdPaths",
+      "recentPaths",
+      "records",
+      "schemaVersion"
+    ]);
     assert.equal("pins" in stored, false);
     assert.deepEqual(plugin.loadActivityData(), stored);
   });
@@ -107,9 +115,50 @@ describe("plugin persistence", () => {
 
     assert.deepEqual(plugin.savedSettings, {
       schemaVersion: 1,
-      pins: [{ path: "Pinned.md", kind: "file" }]
+      pins: [{ path: "Pinned.md", kind: "file" }],
+      display: {
+        limit: 12,
+        sections: { recent: true, created: true, sevenDays: true, allTime: true }
+      }
     });
     assert.equal("recentPaths" in plugin.savedSettings, false);
+  });
+
+  it("saves display changes as merged, clamped settings", async () => {
+    const plugin = new QuickAccessPlugin(makeApp(), { id: "quick-access-dashboard" });
+
+    await plugin.updateDisplay({ sections: { created: false } });
+    await plugin.updateDisplay({ limit: 500 });
+
+    assert.deepEqual(plugin.savedSettings.display, {
+      limit: 50,
+      sections: { recent: true, created: false, sevenDays: true, allTime: true }
+    });
+  });
+
+  it("records file creations only after layout is ready, never folders or excluded paths", () => {
+    let renders = 0;
+    const app = makeApp();
+    const plugin = new QuickAccessPlugin(app, { id: "quick-access-dashboard" });
+    plugin.refreshViews = () => (renders += 1);
+    plugin.scheduleActivitySave = () => {
+      plugin.activitySaveDirty = true;
+      plugin.flushActivitySave();
+    };
+    const file = Object.assign(new FakeFile(), { path: "New note.md" });
+
+    plugin.handleCreate(file);
+    assert.deepEqual(plugin.data.createdPaths, []);
+
+    plugin.layoutReady = true;
+    plugin.handleCreate(Object.assign(new FakeFolder(), { path: "Folder" }));
+    app.vault = { getConfig: () => ["Archive/"] };
+    plugin.handleCreate(Object.assign(new FakeFile(), { path: "Archive/Generated.md" }));
+    plugin.handleCreate(file);
+
+    assert.deepEqual(plugin.data.createdPaths, ["New note.md"]);
+    assert.equal(renders, 1);
+    assert.deepEqual(app.local.get("quick-access-dashboard:activity").createdPaths, ["New note.md"]);
   });
 
   it("resets local activity while preserving pins", () => {

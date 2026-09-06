@@ -3,16 +3,30 @@
 const SCHEMA_VERSION = 1;
 const RECENT_STORAGE_LIMIT = 50;
 const SEVEN_DAY_WINDOW = 7;
+const DEFAULT_DISPLAY_LIMIT = 12;
+const MIN_DISPLAY_LIMIT = 1;
+const MAX_DISPLAY_LIMIT = RECENT_STORAGE_LIMIT;
+const SECTION_KEYS = ["recent", "created", "sevenDays", "allTime"];
 
 function emptyRecordMap() {
   return Object.create(null);
+}
+
+function defaultDisplay() {
+  const sections = {};
+  for (const key of SECTION_KEYS) {
+    sections[key] = true;
+  }
+  return { limit: DEFAULT_DISPLAY_LIMIT, sections };
 }
 
 function emptyData() {
   return {
     schemaVersion: SCHEMA_VERSION,
     pins: [],
+    display: defaultDisplay(),
     recentPaths: [],
+    createdPaths: [],
     records: emptyRecordMap()
   };
 }
@@ -30,6 +44,29 @@ function positiveInteger(value) {
     return 0;
   }
   return Math.min(Math.floor(value), Number.MAX_SAFE_INTEGER);
+}
+
+function displayLimit(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_DISPLAY_LIMIT;
+  }
+  return Math.min(Math.max(Math.floor(value), MIN_DISPLAY_LIMIT), MAX_DISPLAY_LIMIT);
+}
+
+function normaliseDisplay(raw) {
+  const display = defaultDisplay();
+  if (!isObject(raw)) {
+    return display;
+  }
+  display.limit = displayLimit(raw.limit);
+  if (isObject(raw.sections)) {
+    for (const key of SECTION_KEYS) {
+      if (typeof raw.sections[key] === "boolean") {
+        display.sections[key] = raw.sections[key];
+      }
+    }
+  }
+  return display;
 }
 
 function timestamp(value) {
@@ -84,7 +121,9 @@ function normaliseData(raw) {
     }
   }
 
+  data.display = normaliseDisplay(raw.display);
   data.recentPaths = uniquePaths(raw.recentPaths, RECENT_STORAGE_LIMIT);
+  data.createdPaths = uniquePaths(raw.createdPaths, RECENT_STORAGE_LIMIT);
 
   if (isObject(raw.records)) {
     for (const [path, value] of Object.entries(raw.records)) {
@@ -124,7 +163,9 @@ function combineStoredData(settings, activity) {
   const safeActivity = isObject(activity) ? activity : {};
   return normaliseData({
     pins: safeSettings.pins,
+    display: safeSettings.display,
     recentPaths: safeActivity.recentPaths,
+    createdPaths: safeActivity.createdPaths,
     records: safeActivity.records
   });
 }
@@ -133,7 +174,8 @@ function settingsSnapshot(data) {
   const snapshot = cloneData(data);
   return {
     schemaVersion: snapshot.schemaVersion,
-    pins: snapshot.pins
+    pins: snapshot.pins,
+    display: snapshot.display
   };
 }
 
@@ -142,13 +184,18 @@ function activitySnapshot(data) {
   return {
     schemaVersion: snapshot.schemaVersion,
     recentPaths: snapshot.recentPaths,
+    createdPaths: snapshot.createdPaths,
     records: snapshot.records
   };
 }
 
 function clearActivityData(data) {
-  const changed = data.recentPaths.length > 0 || Object.keys(data.records).length > 0;
+  const changed =
+    data.recentPaths.length > 0 ||
+    data.createdPaths.length > 0 ||
+    Object.keys(data.records).length > 0;
   data.recentPaths = [];
+  data.createdPaths = [];
   data.records = emptyRecordMap();
   return changed;
 }
@@ -211,6 +258,44 @@ function recordAccess(data, path, now) {
     0,
     RECENT_STORAGE_LIMIT
   );
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&");
+}
+
+function compileExcludedFilters(filters) {
+  if (!Array.isArray(filters)) {
+    return [];
+  }
+  const compiled = [];
+  for (const filter of filters) {
+    if (typeof filter !== "string" || filter.length === 0) {
+      continue;
+    }
+    const regex = /^\/(.+)\/([a-z]*)$/.exec(filter);
+    try {
+      compiled.push(regex ? new RegExp(regex[1], regex[2]) : new RegExp(`^${escapeRegExp(filter)}`, "i"));
+    } catch {
+      // Ignore filters that are not valid regular expressions.
+    }
+  }
+  return compiled;
+}
+
+function isExcludedPath(path, compiledFilters) {
+  return isPath(path) && compiledFilters.some((filter) => filter.test(path));
+}
+
+function recordCreate(data, path) {
+  if (!isPath(path)) {
+    return false;
+  }
+  data.createdPaths = [path, ...data.createdPaths.filter((candidate) => candidate !== path)].slice(
+    0,
+    RECENT_STORAGE_LIMIT
+  );
+  return true;
 }
 
 function sevenDayCount(record, now) {
@@ -294,12 +379,17 @@ function renamePath(data, oldPath, newPath, folder) {
     return true;
   });
 
-  const remappedRecent = data.recentPaths.map((path) => {
-    const remapped = remapPath(path, oldPath, newPath, folder);
-    changed ||= remapped !== path;
-    return remapped;
-  });
-  data.recentPaths = uniquePaths(remappedRecent, RECENT_STORAGE_LIMIT);
+  const remapList = (paths) =>
+    uniquePaths(
+      paths.map((path) => {
+        const remapped = remapPath(path, oldPath, newPath, folder);
+        changed ||= remapped !== path;
+        return remapped;
+      }),
+      RECENT_STORAGE_LIMIT
+    );
+  data.recentPaths = remapList(data.recentPaths);
+  data.createdPaths = remapList(data.createdPaths);
 
   const records = emptyRecordMap();
   for (const [path, record] of Object.entries(data.records)) {
@@ -326,11 +416,11 @@ function deletePath(data, path, folder) {
   data.pins = data.pins.filter((pin) => !matchesDeletedPath(pin.path, path, folder));
   changed ||= data.pins.length !== pinCount;
 
-  const recentCount = data.recentPaths.length;
-  data.recentPaths = data.recentPaths.filter(
-    (candidate) => !matchesDeletedPath(candidate, path, folder)
-  );
-  changed ||= data.recentPaths.length !== recentCount;
+  for (const key of ["recentPaths", "createdPaths"]) {
+    const count = data[key].length;
+    data[key] = data[key].filter((candidate) => !matchesDeletedPath(candidate, path, folder));
+    changed ||= data[key].length !== count;
+  }
 
   for (const candidate of Object.keys(data.records)) {
     if (matchesDeletedPath(candidate, path, folder)) {
@@ -344,21 +434,29 @@ function deletePath(data, path, folder) {
 
 module.exports = {
   SCHEMA_VERSION,
+  DEFAULT_DISPLAY_LIMIT,
+  MAX_DISPLAY_LIMIT,
+  MIN_DISPLAY_LIMIT,
   RECENT_STORAGE_LIMIT,
+  SECTION_KEYS,
   SEVEN_DAY_WINDOW,
   activitySnapshot,
   clearActivityData,
   cloneData,
   combineStoredData,
+  compileExcludedFilters,
   deletePath,
   emptyData,
+  isExcludedPath,
   localDayKey,
   localDayKeys,
   normaliseData,
+  normaliseDisplay,
   pruneDailyData,
   rankAllTime,
   rankSevenDays,
   recordAccess,
+  recordCreate,
   renamePath,
   settingsSnapshot,
   sevenDayCount

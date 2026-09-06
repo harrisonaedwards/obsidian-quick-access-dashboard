@@ -1,13 +1,15 @@
 # Quick Access Dashboard
 
-A privacy-conscious Obsidian sidebar that keeps files and folders you add, recent files, and most-opened files together.
+A privacy-conscious Obsidian sidebar that keeps files and folders you add, recently opened files, recently created files, and most-opened files together.
 
 ## Features
 
 - Add files and expandable folders to Quick Access.
-- See the 12 most recently active files.
+- See the most recently opened files.
+- See the most recently created files, so a new note is one click away even before search has indexed it.
 - Rank files by opens over the current local day and six preceding local calendar days.
 - Rank files by opens since tracking began or was reset.
+- Choose how many entries each section shows (1 to 50, default 12) and hide sections you do not use.
 - Follow file and folder renames, and remove deleted paths automatically.
 - Reset all device-local access statistics without removing Quick Access items.
 
@@ -18,6 +20,7 @@ A privacy-conscious Obsidian sidebar that keeps files and folders you add, recen
 - Run **Add or remove active file from Quick Access** to toggle the current file.
 - Select a file to open it. Ctrl-click, Cmd-click, or middle-click opens it in a new tab.
 - Run **Reset access statistics** to clear recent and most-opened data on the current device.
+- Open **Settings → Quick Access Dashboard** to set entries per section and show or hide sections.
 
 Quick Access items are entries in this dashboard only. They do not pin Obsidian tabs or modify Bookmarks.
 
@@ -29,11 +32,13 @@ Background reads, searches, indexing, sync, edits, hover previews, and embedded 
 
 Statistics begin after installation. The plugin cannot reconstruct earlier access history.
 
+**Recently created** lists files in the order Obsidian saw them appear in the vault on this device, whether created in Obsidian, by another app, or by sync. It follows renames, so a note created as Untitled keeps its place after you name it. Filesystem creation timestamps are not used because copying, syncing, and atomic saves reset them. Paths matching Obsidian's **Excluded files** setting (Settings → Files and links) are left out, so folders that other tools fill automatically do not crowd the list.
+
 ## Data and privacy
 
 The plugin has no runtime dependencies, network calls, telemetry, advertising, shell access, dynamic code execution, editor-transaction listeners, or note-content access.
 
-Quick Access items use Obsidian's normal plugin data. Access activity uses Obsidian's vault-specific local storage and stays on the device. Stored activity is limited to file paths, a recent-path list, aggregate totals, last-open timestamps, and seven local-date count buckets. The plugin does not retain a raw event log.
+Quick Access items and display settings use Obsidian's normal plugin data. Access activity uses Obsidian's vault-specific local storage and stays on the device. Stored activity is limited to file paths, recent-path and created-path lists, aggregate totals, last-open timestamps, and seven local-date count buckets. The plugin does not retain a raw event log.
 
 ## Installation
 

@@ -7,13 +7,16 @@ const {
   activitySnapshot,
   clearActivityData,
   combineStoredData,
+  compileExcludedFilters,
   deletePath,
   emptyData,
+  isExcludedPath,
   localDayKeys,
   normaliseData,
   rankAllTime,
   rankSevenDays,
   recordAccess,
+  recordCreate,
   renamePath,
   settingsSnapshot
 } = require("../model");
@@ -112,6 +115,91 @@ describe("defensive loading", () => {
   });
 });
 
+describe("display settings", () => {
+  it("defaults, clamps, and ignores malformed display values", () => {
+    assert.deepEqual(normaliseData({ pins: [] }).display, {
+      limit: 12,
+      sections: { recent: true, created: true, sevenDays: true, allTime: true }
+    });
+    assert.equal(normaliseData({ display: { limit: 0 } }).display.limit, 1);
+    assert.equal(normaliseData({ display: { limit: 99.7 } }).display.limit, 50);
+    assert.equal(normaliseData({ display: { limit: "7" } }).display.limit, 12);
+
+    const sections = normaliseData({
+      display: { sections: { created: false, allTime: "no", bogus: false } }
+    }).display.sections;
+    assert.deepEqual(sections, { recent: true, created: false, sevenDays: true, allTime: true });
+  });
+
+  it("keeps display settings with pins in plugin settings", () => {
+    const data = emptyData();
+    data.display.limit = 5;
+    data.display.sections.recent = false;
+
+    const settings = settingsSnapshot(data);
+    assert.deepEqual(settings.display, {
+      limit: 5,
+      sections: { recent: false, created: true, sevenDays: true, allTime: true }
+    });
+    assert.equal("display" in activitySnapshot(data), false);
+    assert.deepEqual(combineStoredData(settings, activitySnapshot(data)).display, settings.display);
+  });
+});
+
+describe("recently created", () => {
+  it("keeps newest-first, de-duplicated, capped created paths in activity data", () => {
+    const data = emptyData();
+    assert.equal(recordCreate(data, ""), false);
+    for (let index = 0; index < 60; index += 1) {
+      recordCreate(data, `Note ${index}.md`);
+    }
+    recordCreate(data, "Note 58.md");
+
+    assert.equal(data.createdPaths.length, 50);
+    assert.deepEqual(data.createdPaths.slice(0, 3), ["Note 58.md", "Note 59.md", "Note 57.md"]);
+    assert.equal("createdPaths" in activitySnapshot(data), true);
+    assert.equal("createdPaths" in settingsSnapshot(data), false);
+    assert.deepEqual(normaliseData({ createdPaths: ["A.md", "A.md", 3] }).createdPaths, ["A.md"]);
+  });
+
+  it("matches Obsidian's excluded-files rules: anchored, escaped, case-insensitive prefixes or /regex/", () => {
+    const compiled = compileExcludedFilters([
+      "06 Archive/OpenCairn/",
+      "Notes (old)/",
+      "/^Daily\\/\\d{4}/",
+      "/[unclosed/",
+      "",
+      42
+    ]);
+
+    assert.equal(compiled.length, 3);
+    assert.equal(isExcludedPath("06 Archive/OpenCairn/Session Logs/a.md", compiled), true);
+    assert.equal(isExcludedPath("06 archive/opencairn/a.md", compiled), true);
+    assert.equal(isExcludedPath("06 Archive/OpenCairnX/a.md", compiled), false);
+    assert.equal(isExcludedPath("Other/06 Archive/OpenCairn/a.md", compiled), false);
+    assert.equal(isExcludedPath("Notes (old)/a.md", compiled), true);
+    assert.equal(isExcludedPath("Daily/2026-09-06.md", compiled), true);
+    assert.equal(isExcludedPath("daily/2026-09-06.md", compiled), false);
+    assert.equal(isExcludedPath("Inbox/a.md", compiled), false);
+    assert.deepEqual(compileExcludedFilters(null), []);
+  });
+
+  it("follows renames and deletions", () => {
+    const data = emptyData();
+    recordCreate(data, "Untitled.md");
+    recordCreate(data, "Inbox/Draft.md");
+
+    assert.equal(renamePath(data, "Untitled.md", "Meeting notes.md", false), true);
+    assert.equal(renamePath(data, "Inbox", "Archive", true), true);
+    assert.deepEqual(data.createdPaths, ["Archive/Draft.md", "Meeting notes.md"]);
+
+    assert.equal(deletePath(data, "Archive", true), true);
+    assert.deepEqual(data.createdPaths, ["Meeting notes.md"]);
+    assert.equal(clearActivityData(data), true);
+    assert.deepEqual(data.createdPaths, []);
+  });
+});
+
 describe("persistence boundaries", () => {
   it("keeps pins in plugin settings and activity in vault-local storage", () => {
     const data = emptyData();
@@ -123,9 +211,18 @@ describe("persistence boundaries", () => {
 
     assert.deepEqual(settings, {
       schemaVersion: 1,
-      pins: [{ path: "Pinned.md", kind: "file" }]
+      pins: [{ path: "Pinned.md", kind: "file" }],
+      display: {
+        limit: 12,
+        sections: { recent: true, created: true, sevenDays: true, allTime: true }
+      }
     });
-    assert.deepEqual(Object.keys(activity).sort(), ["recentPaths", "records", "schemaVersion"]);
+    assert.deepEqual(Object.keys(activity).sort(), [
+      "createdPaths",
+      "recentPaths",
+      "records",
+      "schemaVersion"
+    ]);
     assert.equal("pins" in activity, false);
     assert.equal("records" in settings, false);
     assert.deepEqual(combineStoredData(settings, activity), data);
